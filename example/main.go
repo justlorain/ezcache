@@ -1,14 +1,3 @@
-# EZCache
-
-## Install
-
-```shell
-go get -u github.com/justlorain/ezcache
-```
-
-## Usage
-
-```go
 package main
 
 import (
@@ -38,8 +27,3 @@ func ParseFlags() []string {
 	flag.Parse()
 	return strings.Split(addrsFlag, ",")
 }
-```
-
-## License
-
-EZCache is distributed under the [Apache License 2.0](./LICENSE).

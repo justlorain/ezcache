@@ -18,7 +18,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -68,6 +70,8 @@ func (e *Engine) Run() error {
 		Addr:    e.options.Addr,
 		Handler: mux,
 	}
+	slog.Info("EZCache: engine starts running", "addr", e.options.Addr)
+	slog.Info("EZCache: node list", "addrs", e.addrs)
 	return srv.ListenAndServe()
 }
 
@@ -94,7 +98,7 @@ func (e *Engine) Set(w http.ResponseWriter, r *http.Request) {
 	defer e.mu.RUnlock()
 	for _, addr := range e.addrs {
 		// skip node itself
-		if addr == e.options.Addr {
+		if strings.Contains(addr, e.options.Addr) {
 			continue
 		}
 
@@ -105,6 +109,7 @@ func (e *Engine) Set(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, err = http.DefaultClient.Do(req)
+		slog.Info("EZCache: node set distantly", "from", e.options.Addr, "to", addr)
 		if err != nil {
 			http.Error(w, ErrFormRequest.Error(), http.StatusInternalServerError)
 			return
@@ -122,6 +127,11 @@ func (e *Engine) Get(w http.ResponseWriter, r *http.Request) {
 	// get locally
 	if value, ok := e.cache.Get(key); ok {
 		_, _ = w.Write(value.ByteSlice())
+		return
+	}
+
+	// drop if from internal node
+	if r.URL.Query().Get("type") == "internal" {
 		return
 	}
 
@@ -143,20 +153,20 @@ func (e *Engine) Get(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, ErrPickNote.Error(), http.StatusInternalServerError)
 			return
 		}
-		// retry
-		if pickedNodeAddr == e.options.Addr {
+		// skip node itself
+		if strings.Contains(pickedNodeAddr, e.options.Addr) {
 			continue
 		}
 
-		url := fmt.Sprintf("%v%v/%v", pickedNodeAddr, e.options.BasePath, key)
+		url := fmt.Sprintf("%v%v/%v%v", pickedNodeAddr, e.options.BasePath, key, _internalFlag)
 		req, err := http.NewRequest(http.MethodGet, url, nil)
 		if err != nil {
 			http.Error(w, ErrFormRequest.Error(), http.StatusInternalServerError)
 			return
 		}
 		resp, err := http.DefaultClient.Do(req)
+		slog.Info("EZCache: node get distantly", "from", e.options.Addr, "to", pickedNodeAddr)
 		if err != nil {
-			_ = resp.Body.Close()
 			http.Error(w, ErrFormRequest.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -201,7 +211,8 @@ func (e *Engine) Delete(w http.ResponseWriter, r *http.Request) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	for _, addr := range e.addrs {
-		if addr == e.options.Addr {
+		// skip node itself
+		if strings.Contains(addr, e.options.Addr) {
 			continue
 		}
 		url := fmt.Sprintf("%v%v/%v%v", addr, e.options.BasePath, key, _internalFlag)
@@ -211,6 +222,7 @@ func (e *Engine) Delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, err = http.DefaultClient.Do(req)
+		slog.Info("EZCache: node get distantly", "from", e.options.Addr, "to", addr)
 		if err != nil {
 			http.Error(w, ErrFormRequest.Error(), http.StatusInternalServerError)
 			return

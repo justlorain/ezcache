@@ -14,9 +14,16 @@
 
 package ezcache
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestRun(t *testing.T) {
-	e := NewEngine()
-	_ = e.Run()
+	addrs := []string{"http://localhost:7246", "http://localhost:7247", "http://localhost:7248"}
+	e := NewEngine(WithAddr(addrs[0]))
+	e.RegisterNodes(addrs...)
+	if err := e.Run(); err != nil {
+		fmt.Println(err)
+	}
 }
