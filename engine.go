@@ -28,8 +28,6 @@ import (
 var (
 	ErrEmptyParam        = errors.New("error empty param")
 	ErrPickNote          = errors.New("error pick node")
-	ErrFormRequest       = errors.New("error form request")
-	ErrReadBody          = errors.New("error read body")
 	ErrReachedRetryTimes = errors.New("error reached retry times")
 )
 
@@ -105,14 +103,14 @@ func (e *Engine) Set(w http.ResponseWriter, r *http.Request) {
 		url := fmt.Sprintf("%v%v/%v/%v%v", addr, e.options.BasePath, key, value, _internalFlag)
 		req, err := http.NewRequest(http.MethodPost, url, nil)
 		if err != nil {
-			http.Error(w, ErrFormRequest.Error(), http.StatusInternalServerError)
-			return
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			continue
 		}
 		_, err = http.DefaultClient.Do(req)
 		slog.Info("EZCache: node set distantly", "from", e.options.Addr, "to", addr)
 		if err != nil {
-			http.Error(w, ErrFormRequest.Error(), http.StatusInternalServerError)
-			return
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			continue
 		}
 	}
 }
@@ -153,25 +151,23 @@ func (e *Engine) Get(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, ErrPickNote.Error(), http.StatusInternalServerError)
 			return
 		}
-		// skip node itself
 		if strings.Contains(pickedNodeAddr, e.options.Addr) {
-			continue
+			return
 		}
 
 		url := fmt.Sprintf("%v%v/%v%v", pickedNodeAddr, e.options.BasePath, key, _internalFlag)
 		req, err := http.NewRequest(http.MethodGet, url, nil)
 		if err != nil {
-			http.Error(w, ErrFormRequest.Error(), http.StatusInternalServerError)
-			return
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			continue
 		}
 		resp, err := http.DefaultClient.Do(req)
 		slog.Info("EZCache: node get distantly", "from", e.options.Addr, "to", pickedNodeAddr)
 		if err != nil {
-			http.Error(w, ErrFormRequest.Error(), http.StatusInternalServerError)
-			return
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			continue
 		}
 
-		// retry
 		if resp.StatusCode != http.StatusOK {
 			_ = resp.Body.Close()
 			continue
@@ -179,8 +175,8 @@ func (e *Engine) Get(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if err != nil {
-			http.Error(w, ErrReadBody.Error(), http.StatusInternalServerError)
-			return
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			continue
 		}
 		// populate cache
 		e.cache.Set(key, ByteView{
@@ -218,14 +214,14 @@ func (e *Engine) Delete(w http.ResponseWriter, r *http.Request) {
 		url := fmt.Sprintf("%v%v/%v%v", addr, e.options.BasePath, key, _internalFlag)
 		req, err := http.NewRequest(http.MethodDelete, url, nil)
 		if err != nil {
-			http.Error(w, ErrFormRequest.Error(), http.StatusInternalServerError)
-			return
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			continue
 		}
 		_, err = http.DefaultClient.Do(req)
 		slog.Info("EZCache: node delete distantly", "from", e.options.Addr, "to", addr)
 		if err != nil {
-			http.Error(w, ErrFormRequest.Error(), http.StatusInternalServerError)
-			return
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			continue
 		}
 	}
 
