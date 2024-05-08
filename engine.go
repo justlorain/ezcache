@@ -222,7 +222,7 @@ func (e *Engine) Delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, err = http.DefaultClient.Do(req)
-		slog.Info("EZCache: node get distantly", "from", e.options.Addr, "to", addr)
+		slog.Info("EZCache: node delete distantly", "from", e.options.Addr, "to", addr)
 		if err != nil {
 			http.Error(w, ErrFormRequest.Error(), http.StatusInternalServerError)
 			return
