@@ -20,7 +20,7 @@ import (
 
 func main() {
 	addrs := ParseFlags()
-	e := ezcache.NewEngine(ezcache.WithAddr(addrs[0]))
+	e := ezcache.NewEngine(addrs[0])
 	e.RegisterNodes(addrs...)
 	if err := e.Run(); err != nil {
 		return
@@ -39,6 +39,14 @@ func ParseFlags() []string {
 	return strings.Split(addrsFlag, ",")
 }
 ```
+
+## Configuration
+
+| Option                   | Default              | Description                               |
+|--------------------------|----------------------|-------------------------------------------|
+| ` WithBasePath`          | `/_ezcache`          | Define base path of server                |
+| ` WithReplicationFactor` | `10`                 | Define consistent hash replication factor |
+| ` WithHashFunc`          | `crc32.ChecksumIEEE` | Define hash func used by consistent hash  |
 
 ## License
 

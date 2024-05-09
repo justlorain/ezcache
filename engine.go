@@ -32,16 +32,18 @@ var (
 type Engine struct {
 	mu      sync.RWMutex
 	options *Options
+	self    string
 	nodes   *Hash
 	cache   *Cache
 	addrs   []string
 }
 
-func NewEngine(opts ...Option) *Engine {
+func NewEngine(addr string, opts ...Option) *Engine {
 	options := newOptions(opts...)
 	return &Engine{
 		options: options,
-		nodes:   NewHash(0, nil),
+		self:    StandardizeAddr(addr),
+		nodes:   NewHash(options.ReplicationFactor, options.HashFunc),
 		cache:   NewCache(),
 		addrs:   make([]string, 0),
 	}
@@ -61,10 +63,10 @@ func (e *Engine) Run() error {
 	mux.HandleFunc("GET "+e.options.BasePath+"/{key}", e.Get)
 	mux.HandleFunc("DELETE "+e.options.BasePath+"/{key}", e.Delete)
 	srv := http.Server{
-		Addr:    e.options.Addr,
+		Addr:    e.self,
 		Handler: mux,
 	}
-	slog.Info("EZCache: engine starts running", "addr", e.options.Addr)
+	slog.Info("EZCache: engine starts running", "addr", e.self)
 	slog.Info("EZCache: node list", "addrs", e.addrs)
 	return srv.ListenAndServe()
 }
@@ -87,7 +89,7 @@ func (e *Engine) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.Contains(pickedNodeAddr, e.options.Addr) {
+	if strings.Contains(pickedNodeAddr, e.self) {
 		e.cache.Set(key, ByteView{
 			B: []byte(value),
 		})
@@ -100,7 +102,7 @@ func (e *Engine) Set(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	slog.Info("EZCache: node redirect set request", "from", e.options.Addr, "to", pickedNodeAddr)
+	slog.Info("EZCache: node redirect set request", "from", e.self, "to", pickedNodeAddr)
 }
 
 func (e *Engine) Get(w http.ResponseWriter, r *http.Request) {
@@ -120,7 +122,7 @@ func (e *Engine) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.Contains(pickedNodeAddr, e.options.Addr) {
+	if strings.Contains(pickedNodeAddr, e.self) {
 		if v, ok := e.cache.Get(key); ok {
 			_, _ = w.Write(v.ByteSlice())
 			slog.Info("EZCache: get", "key", key, "value", v.String())
@@ -131,7 +133,7 @@ func (e *Engine) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	url := fmt.Sprintf("%v%v/%v", pickedNodeAddr, e.options.BasePath, key)
-	slog.Info("EZCache: node redirect get request", "from", e.options.Addr, "to", pickedNodeAddr)
+	slog.Info("EZCache: node redirect get request", "from", e.self, "to", pickedNodeAddr)
 	http.Redirect(w, r, url, http.StatusFound)
 }
 
@@ -152,7 +154,7 @@ func (e *Engine) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.Contains(pickedNodeAddr, e.options.Addr) {
+	if strings.Contains(pickedNodeAddr, e.self) {
 		e.cache.Delete(key)
 		slog.Info("EZCache: delete", "key", key)
 		return
@@ -163,7 +165,7 @@ func (e *Engine) Delete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	slog.Info("EZCache: node redirect delete request", "from", e.options.Addr, "to", pickedNodeAddr)
+	slog.Info("EZCache: node redirect delete request", "from", e.self, "to", pickedNodeAddr)
 }
 
 func DoHTTPRequest(method, url string, body io.Reader) error {
@@ -176,4 +178,16 @@ func DoHTTPRequest(method, url string, body io.Reader) error {
 		return err
 	}
 	return nil
+}
+
+func StandardizeAddr(addr string) string {
+	segments := strings.Split(addr, "://")
+	length := len(segments)
+	if length == 1 {
+		return segments[0]
+	}
+	if length == 2 {
+		return segments[1]
+	}
+	return ""
 }

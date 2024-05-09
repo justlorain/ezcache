@@ -14,27 +14,29 @@
 
 package ezcache
 
-import "strings"
+import (
+	"hash/crc32"
+)
 
 type Option func(o *Options)
 
 type Options struct {
-	BasePath   string
-	Addr       string
-	RetryTimes int
+	BasePath          string
+	ReplicationFactor int
+	HashFunc          HashFunc
 }
 
 var defaultOptions = Options{
-	BasePath:   "/_ezcache",
-	Addr:       ":8080",
-	RetryTimes: 3,
+	BasePath:          "/_ezcache",
+	ReplicationFactor: 10,
+	HashFunc:          crc32.ChecksumIEEE,
 }
 
 func newOptions(opts ...Option) *Options {
 	options := &Options{
-		BasePath:   defaultOptions.BasePath,
-		Addr:       defaultOptions.Addr,
-		RetryTimes: defaultOptions.RetryTimes,
+		BasePath:          defaultOptions.BasePath,
+		ReplicationFactor: defaultOptions.ReplicationFactor,
+		HashFunc:          defaultOptions.HashFunc,
 	}
 	options.apply(opts...)
 	return options
@@ -53,29 +55,16 @@ func WithBasePath(path string) Option {
 	}
 }
 
-// WithAddr used to define host addr server listens
-func WithAddr(addr string) Option {
-	addr = StandardizeAddr(addr)
+// WithReplicationFactor used to define consistent hash replication factor
+func WithReplicationFactor(factor int) Option {
 	return func(o *Options) {
-		o.Addr = addr
+		o.ReplicationFactor = factor
 	}
 }
 
-// WithRetryTimes used to define retry times for each node
-func WithRetryTimes(times int) Option {
+// WithHashFunc used to define hash func used by consistent hash
+func WithHashFunc(fn HashFunc) Option {
 	return func(o *Options) {
-		o.RetryTimes = times
+		o.HashFunc = fn
 	}
-}
-
-func StandardizeAddr(addr string) string {
-	segments := strings.Split(addr, "://")
-	length := len(segments)
-	if length == 1 {
-		return segments[0]
-	}
-	if length == 2 {
-		return segments[1]
-	}
-	return ""
 }

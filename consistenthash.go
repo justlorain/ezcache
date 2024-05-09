@@ -16,7 +16,6 @@ package ezcache
 
 import (
 	"fmt"
-	"hash/crc32"
 	"sort"
 )
 
@@ -30,16 +29,7 @@ type Hash struct {
 type HashFunc func(data []byte) uint32
 
 // NewHash consistent hash
-// NOTE: if factor <= 0 or hash == nil, default value will be used
-// default replication factor: 10
-// default hash func: crc32.CheckSumIEEE
 func NewHash(factor int, fn HashFunc) *Hash {
-	if factor <= 0 {
-		factor = 10
-	}
-	if fn == nil {
-		fn = crc32.ChecksumIEEE
-	}
 	return &Hash{
 		ring:              make([]uint32, 0),
 		nodes:             make(map[uint32]string, 0),

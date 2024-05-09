@@ -23,7 +23,7 @@ import (
 
 func main() {
 	addrs := ParseFlags()
-	e := ezcache.NewEngine(ezcache.WithAddr(addrs[0]))
+	e := ezcache.NewEngine(addrs[0])
 	e.RegisterNodes(addrs...)
 	if err := e.Run(); err != nil {
 		return
