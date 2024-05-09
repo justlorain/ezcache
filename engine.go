@@ -22,16 +22,12 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 )
 
 var (
-	ErrEmptyParam        = errors.New("error empty param")
-	ErrPickNote          = errors.New("error pick node")
-	ErrReachedRetryTimes = errors.New("error reached retry times")
+	ErrEmptyParam = errors.New("error empty param")
+	ErrPickNote   = errors.New("error pick node")
 )
-
-const _internalFlag = "?type=internal"
 
 type Engine struct {
 	mu      sync.RWMutex
@@ -81,38 +77,30 @@ func (e *Engine) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// set locally
-	e.cache.Set(key, ByteView{
-		B: []byte(value),
-	})
+	e.mu.RLock()
+	pickedNodeAddr := e.nodes.Get(key)
+	e.mu.RUnlock()
+	slog.Info("EZCache: pick node", "addr", pickedNodeAddr)
 
-	// drop if from internal node
-	if r.URL.Query().Get("type") == "internal" {
+	if pickedNodeAddr == "" {
+		http.Error(w, ErrPickNote.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// set distantly
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	for _, addr := range e.addrs {
-		// skip node itself
-		if strings.Contains(addr, e.options.Addr) {
-			continue
-		}
-
-		url := fmt.Sprintf("%v%v/%v/%v%v", addr, e.options.BasePath, key, value, _internalFlag)
-		req, err := http.NewRequest(http.MethodPost, url, nil)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			continue
-		}
-		_, err = http.DefaultClient.Do(req)
-		slog.Info("EZCache: node set distantly", "from", e.options.Addr, "to", addr)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			continue
-		}
+	if strings.Contains(pickedNodeAddr, e.options.Addr) {
+		e.cache.Set(key, ByteView{
+			B: []byte(value),
+		})
+		slog.Info("EZCache: set", "key", key, "value", value)
+		return
 	}
+
+	url := fmt.Sprintf("%v%v/%v/%v", pickedNodeAddr, e.options.BasePath, key, value)
+	if err := DoHTTPRequest(http.MethodPost, url, nil); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	slog.Info("EZCache: node redirect set request", "from", e.options.Addr, "to", pickedNodeAddr)
 }
 
 func (e *Engine) Get(w http.ResponseWriter, r *http.Request) {
@@ -122,70 +110,29 @@ func (e *Engine) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// get locally
-	if value, ok := e.cache.Get(key); ok {
-		_, _ = w.Write(value.ByteSlice())
+	e.mu.RLock()
+	pickedNodeAddr := e.nodes.Get(key)
+	e.mu.RUnlock()
+	slog.Info("EZCache: pick node", "addr", pickedNodeAddr)
+
+	if pickedNodeAddr == "" {
+		http.Error(w, ErrPickNote.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// drop if from internal node
-	if r.URL.Query().Get("type") == "internal" {
+	if strings.Contains(pickedNodeAddr, e.options.Addr) {
+		if v, ok := e.cache.Get(key); ok {
+			_, _ = w.Write(v.ByteSlice())
+			slog.Info("EZCache: get", "key", key, "value", v.String())
+			return
+		}
+		slog.Info("EZCache: key does not exist", "key", key)
 		return
 	}
 
-	// get distantly
-	var times uint32 = 0
-	for {
-		atomic.AddUint32(&times, 1)
-		// reached max retry times
-		if int(atomic.LoadUint32(&times)) == e.options.RetryTimes {
-			http.Error(w, ErrReachedRetryTimes.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		e.mu.RLock()
-		pickedNodeAddr := e.nodes.Get(key)
-		e.mu.RUnlock()
-
-		if pickedNodeAddr == "" {
-			http.Error(w, ErrPickNote.Error(), http.StatusInternalServerError)
-			return
-		}
-		if strings.Contains(pickedNodeAddr, e.options.Addr) {
-			return
-		}
-
-		url := fmt.Sprintf("%v%v/%v%v", pickedNodeAddr, e.options.BasePath, key, _internalFlag)
-		req, err := http.NewRequest(http.MethodGet, url, nil)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			continue
-		}
-		resp, err := http.DefaultClient.Do(req)
-		slog.Info("EZCache: node get distantly", "from", e.options.Addr, "to", pickedNodeAddr)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			continue
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			_ = resp.Body.Close()
-			continue
-		}
-		body, err := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			continue
-		}
-		// populate cache
-		e.cache.Set(key, ByteView{
-			B: CopyBytes(body),
-		})
-
-		_, _ = w.Write(body)
-		return
-	}
+	url := fmt.Sprintf("%v%v/%v", pickedNodeAddr, e.options.BasePath, key)
+	slog.Info("EZCache: node redirect get request", "from", e.options.Addr, "to", pickedNodeAddr)
+	http.Redirect(w, r, url, http.StatusFound)
 }
 
 func (e *Engine) Delete(w http.ResponseWriter, r *http.Request) {
@@ -195,34 +142,38 @@ func (e *Engine) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// delete locally
-	e.cache.Delete(key)
+	e.mu.RLock()
+	pickedNodeAddr := e.nodes.Get(key)
+	e.mu.RUnlock()
+	slog.Info("EZCache: pick node", "addr", pickedNodeAddr)
 
-	// drop if from internal node
-	if r.URL.Query().Get("type") == "internal" {
+	if pickedNodeAddr == "" {
+		http.Error(w, ErrPickNote.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// delete distantly
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	for _, addr := range e.addrs {
-		// skip node itself
-		if strings.Contains(addr, e.options.Addr) {
-			continue
-		}
-		url := fmt.Sprintf("%v%v/%v%v", addr, e.options.BasePath, key, _internalFlag)
-		req, err := http.NewRequest(http.MethodDelete, url, nil)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			continue
-		}
-		_, err = http.DefaultClient.Do(req)
-		slog.Info("EZCache: node delete distantly", "from", e.options.Addr, "to", addr)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			continue
-		}
+	if strings.Contains(pickedNodeAddr, e.options.Addr) {
+		e.cache.Delete(key)
+		slog.Info("EZCache: delete", "key", key)
+		return
 	}
 
+	url := fmt.Sprintf("%v%v/%v", pickedNodeAddr, e.options.BasePath, key)
+	if err := DoHTTPRequest(http.MethodDelete, url, nil); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	slog.Info("EZCache: node redirect delete request", "from", e.options.Addr, "to", pickedNodeAddr)
+}
+
+func DoHTTPRequest(method, url string, body io.Reader) error {
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return err
+	}
+	_, err = http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	return nil
 }
