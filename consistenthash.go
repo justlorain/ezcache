@@ -32,7 +32,7 @@ type HashFunc func(data []byte) uint32
 func NewHash(factor int, fn HashFunc) *Hash {
 	return &Hash{
 		ring:              make([]uint32, 0),
-		nodes:             make(map[uint32]string, 0),
+		nodes:             make(map[uint32]string),
 		replicationFactor: factor,
 		hashFunc:          fn,
 	}
@@ -60,6 +60,7 @@ func (h *Hash) Get(key string) string {
 	idx := sort.Search(len(h.ring), func(i int) bool {
 		return h.ring[i] >= hash
 	})
+	// handle case idx == len(h.ring), which will choose h.ring[0]
 	if idx >= len(h.ring) {
 		idx = 0
 	}
