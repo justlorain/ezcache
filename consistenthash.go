@@ -15,6 +15,7 @@
 package ezcache
 
 import (
+	"crypto/sha1"
 	"fmt"
 	"sort"
 )
@@ -41,7 +42,7 @@ func NewHash(factor int, fn HashFunc) *Hash {
 func (h *Hash) Add(nodes ...string) {
 	for _, node := range nodes {
 		for i := 0; i < h.replicationFactor; i++ {
-			hash := h.hashFunc([]byte(fmt.Sprintf("%s%d", node, i)))
+			hash := h.hashFunc([]byte(fmt.Sprintf("%s#%d", node, i)))
 			h.nodes[hash] = node
 			h.ring = append(h.ring, hash)
 		}
@@ -60,27 +61,33 @@ func (h *Hash) Get(key string) string {
 	idx := sort.Search(len(h.ring), func(i int) bool {
 		return h.ring[i] >= hash
 	})
-	// handle case idx == len(h.ring), which will choose h.ring[0]
+	// handle case idx >= len(h.ring), which will choose h.ring[0]
 	if idx >= len(h.ring) {
 		idx = 0
 	}
 	return h.nodes[h.ring[idx]]
 }
 
-func (h *Hash) Remove(key string) {
-	if key == "" {
+func (h *Hash) Remove(node string) {
+	if node == "" {
 		return
 	}
 	for i := 0; i < h.replicationFactor; i++ {
-		hash := h.hashFunc([]byte(fmt.Sprintf("%s%d", key, i)))
-		delete(h.nodes, hash)
+		hash := h.hashFunc([]byte(fmt.Sprintf("%s#%d", node, i)))
 		idx := SearchUint32s(h.ring, hash)
 		if idx == -1 {
 			return
 		}
-		copy(h.ring[idx:], h.ring[idx+1:])
-		h.ring = h.ring[:len(h.ring)-1]
+		h.ring = append(h.ring[:idx], h.ring[idx+1:]...)
+		delete(h.nodes, hash)
 	}
+}
+
+func Sha1Hash(key []byte) uint32 {
+	h := sha1.New()
+	h.Write(key)
+	sum := h.Sum(nil)
+	return uint32((int(sum[0]) << 24) + (int(sum[1]) << 16) + (int(sum[2]) << 8) + int(sum[3]))
 }
 
 func SearchUint32s(s []uint32, target uint32) int {
